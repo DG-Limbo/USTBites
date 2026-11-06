@@ -1,0 +1,10 @@
+rules_version = '2';
+// Prototype rules for the ISOM 2010 demo: anyone with the link can read and write USTBites data.
+// Fine for a class test with friends; lock down or delete the project after the course.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{collection}/{docId} {
+      allow read, write: if collection in ['orders', 'profiles', 'config', 'leases'];
+    }
+  }
+}

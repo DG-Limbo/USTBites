@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0D4F66">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="USTBites">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<!-- Firebase (realtime database shared by every phone) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<title>USTBites</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one phone-width app column, sticky top bar, bottom tab bar; receipt-ticket cards for pickup numbers and handoff codes. */
+:root{
+  --bg:#EEF2F4; --surface:#FFFFFF; --sunk:#E4EAEE; --ink:#13222B; --muted:#5A6B76; --line:#D5DEE4;
+  --brand:#0D4F66; --brand-ink:#FFFFFF; --brand-soft:#DCEBF0;
+  --accent:#E9A100; --accent-soft:#FDF1D3; --accent-ink:#5A3D00;
+  --good:#1D7F55; --good-soft:#DDF2E8; --bad:#B4380F; --bad-soft:#FBE4DA;
+  --shadow:0 1px 2px rgba(19,34,43,.06),0 6px 18px rgba(19,34,43,.06);
+  --f-display:"Bricolage Grotesque","Figtree",system-ui,sans-serif;
+  --f-body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0C1418; --surface:#142128; --sunk:#0F1B20; --ink:#E7EEF1; --muted:#93A5AF; --line:#24353D;
+  --brand:#5BB8CF; --brand-ink:#06232D; --brand-soft:#16323C;
+  --accent:#F4B731; --accent-soft:#3A2F12; --accent-ink:#FCE7B0;
+  --good:#4CC28C; --good-soft:#123326; --bad:#F08A63; --bad-soft:#3A1D12;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 18px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0C1418; --surface:#142128; --sunk:#0F1B20; --ink:#E7EEF1; --muted:#93A5AF; --line:#24353D;
+  --brand:#5BB8CF; --brand-ink:#06232D; --brand-soft:#16323C;
+  --accent:#F4B731; --accent-soft:#3A2F12; --accent-ink:#FCE7B0;
+  --good:#4CC28C; --good-soft:#123326; --bad:#F08A63; --bad-soft:#3A1D12;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 18px rgba(0,0,0,.25); color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.app{max-width:460px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px;display:flex;align-items:center;gap:10px}
+.word{font-family:var(--f-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand)}
+.word b{color:var(--accent);font-weight:800}
+.top .sp{flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 9px;border-radius:999px;background:var(--sunk);color:var(--muted);white-space:nowrap}
+.chip.on{background:var(--good-soft);color:var(--good)}
+.chip.pri{background:var(--accent-soft);color:var(--accent-ink)}
+.chip.test{background:var(--bad-soft);color:var(--bad)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+main{flex:1;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 96px;display:flex;flex-direction:column;gap:14px}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.nav-in{max-width:460px;margin:0 auto;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px))}
+.nav button{background:none;border:0;padding:10px 4px 12px;font-size:12px;font-weight:600;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+.nav button[aria-current="page"]{color:var(--brand)}
+.nav svg{width:22px;height:22px}
+h1{font-family:var(--f-display);font-weight:800;font-size:26px;line-height:1.1;letter-spacing:-.02em;margin:0;text-wrap:balance}
+h2{font-family:var(--f-display);font-weight:600;font-size:19px;line-height:1.2;margin:0;text-wrap:balance}
+h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:700}
+p{margin:0}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow)}
+.flat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:10px}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+.row>.grow{flex:1;min-width:0}
+.stack{display:flex;flex-direction:column;gap:8px}
+label.f{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px}
+label.f .hint{font-weight:400;color:var(--muted);font-size:13px}
+input[type=text],input[type=email],input[inputmode],select{width:100%;padding:12px 13px;border:1.5px solid var(--line);border-radius:11px;background:var(--surface);font-size:16px}
+input:focus,select:focus{border-color:var(--brand);outline:none}
+input.err{border-color:var(--bad)}
+.errmsg{color:var(--bad);font-size:13px;font-weight:600}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;background:var(--sunk);padding:4px;border-radius:12px}
+.seg button{border:0;background:none;padding:9px 6px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.btn{border:0;border-radius:12px;padding:14px 16px;font-weight:700;font-size:16px;cursor:pointer;background:var(--brand);color:var(--brand-ink);display:inline-flex;justify-content:center;align-items:center;gap:8px;width:100%}
+.btn.ghost{background:var(--sunk);color:var(--ink)}
+.btn.warn{background:var(--bad);color:#fff}
+.btn.sm{width:auto;padding:9px 14px;font-size:14px;border-radius:10px}
+.btn:disabled{opacity:.5;cursor:default}
+.linkbtn{background:none;border:0;color:var(--brand);font-weight:600;cursor:pointer;padding:0;font-size:14px}
+.toggle{display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--r);border:1.5px solid var(--line);background:var(--surface);cursor:pointer;width:100%;text-align:left}
+.toggle[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.toggle.avail[aria-pressed="true"]{border-color:var(--good);background:var(--good-soft)}
+.sw{width:44px;height:26px;border-radius:13px;background:var(--line);position:relative;flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+[aria-pressed="true"] .sw{background:var(--accent)}
+.avail[aria-pressed="true"] .sw{background:var(--good)}
+[aria-pressed="true"] .sw::after{transform:translateX(18px)}
+.price{display:flex;flex-direction:column;gap:6px;font-variant-numeric:tabular-nums}
+.price .ln{display:flex;justify-content:space-between;color:var(--muted);font-size:14px}
+.price .tot{display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed var(--line);padding-top:8px;margin-top:2px}
+.price .tot b{font-family:var(--f-display);font-size:28px;font-weight:800;letter-spacing:-.02em}
+.sched{display:flex;flex-wrap:wrap;gap:6px}
+/* receipt ticket */
+.ticket{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.ticket::before,.ticket::after{content:"";position:absolute;top:50%;width:16px;height:16px;border-radius:50%;background:var(--bg);border:1px solid var(--line);transform:translateY(-50%)}
+.ticket::before{left:-9px;clip-path:inset(0 0 0 50%)}
+.ticket::after{right:-9px;clip-path:inset(0 50% 0 0)}
+.ticket .big{font-family:var(--f-mono);font-weight:700;font-size:40px;letter-spacing:.14em;line-height:1.1;color:var(--ink)}
+.ticket.code{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.ticket.code .big{color:var(--brand-ink);font-size:52px}
+.ticket.code .lbl{color:var(--brand-ink);opacity:.8}
+.lbl{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+/* stepper */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.st{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
+.st i{height:5px;border-radius:3px;background:var(--line)}
+.st.done i{background:var(--brand)}
+.st.now{color:var(--ink)}
+.st.now i{background:var(--brand);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.st.now i,.ping{animation:none}}
+.ping{width:10px;height:10px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 0 var(--brand);animation:ping 1.6s infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--brand) 50%,transparent)}100%{box-shadow:0 0 0 14px transparent}}
+.req{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:var(--r);background:var(--surface);border:1px solid var(--line)}
+.req.priority{border-color:var(--accent);box-shadow:inset 4px 0 0 var(--accent)}
+.req .earn{font-family:var(--f-display);font-weight:800;font-size:22px;color:var(--good)}
+.person{display:flex;align-items:center;gap:12px}
+.av{width:42px;height:42px;border-radius:50%;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-family:var(--f-display);font-weight:800;font-size:18px;flex:none}
+.stars{display:flex;gap:6px}
+.stars button{background:none;border:0;padding:2px;cursor:pointer;color:var(--line)}
+.stars button[aria-pressed="true"]{color:var(--accent)}
+.stars svg{width:34px;height:34px}
+.scale{display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+.scale button{border:1.5px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 0;font-weight:700;font-size:14px;cursor:pointer}
+.scale button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.codein{font-family:var(--f-mono);font-size:30px;letter-spacing:.5em;text-align:center;padding:12px 0 12px .5em}
+.banner{border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:10px}
+.banner.warn{background:var(--bad-soft);color:var(--ink);border:1px solid color-mix(in srgb,var(--bad) 35%,transparent)}
+.banner.ok{background:var(--good-soft);border:1px solid color-mix(in srgb,var(--good) 35%,transparent)}
+.banner.info{background:var(--brand-soft)}
+.empty{text-align:center;padding:28px 16px;color:var(--muted);display:flex;flex-direction:column;gap:6px;align-items:center}
+.empty b{color:var(--ink);font-size:16px}
+.hero{display:flex;flex-direction:column;gap:10px;padding:12px 0 4px}
+.hero .word{font-size:40px}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:2px}
+.tile b{font-family:var(--f-display);font-size:26px;font-weight:800;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;font-size:14px;z-index:20;max-width:calc(100% - 32px);box-shadow:var(--shadow)}
+textarea{width:100%;min-height:140px;font-family:var(--f-mono);font-size:12px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--sunk);color:var(--ink)}
+hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+</style>
+
+<div class="app" id="app"></div>
+
+<script>
+(function(){
+"use strict";
+/* ---------- constants (edit here) ---------- */
+const HALLS=["Hall I","Hall II","Hall III","Hall IV","Hall V","Hall VI","Hall VII","Hall VIII","Hall IX"];
+const CANTEENS=["LG7 Canteen","LG1 Canteen"];
+const DOMAIN="@connect.ust.hk";
+const FEE_OFFPEAK=12, FEE_PEAK=15, FEE_PRIORITY=5, PLATFORM_FEE=2;
+const PEAKS=[[11*60+30,14*60,"lunch rush"],[17*60+30,20*60+30,"dinner rush"]]; // HK time, minutes
+const OFFER_MS=3*60*1000;      // A/B version B: one runner first for 3 minutes
+const ALERT_MS=10*60*1000;     // no runner after 10 minutes
+const SUCCESS_MS=5*60*1000;    // A/B success: accepted within 5 minutes
+const LS_KEY="ustbites.me";
+
+/* ---------- state ---------- */
+const S={db:null,user:null,dl:null,dbState:"connecting",canWrite:null,me:null,
+  profiles:{},orders:{},config:{},loaded:{p:false,o:false},slow:false,
+  tab:"order",screen:null,signup:{step:1,email:"",name:"",hall:"",role:"both",err:""},
+  form:{canteen:CANTEENS[0],pickup:"",room:"",priority:false,err:{}},
+  code:"",codeErr:"",rate:{},score:{},confirmCancel:null,confirmReset:"",busy:false,
+  toast:"",csv:null,alertLogged:new Set(),waiting:new Set()};
+
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const now=()=>Date.now();
+const rid=(n=6)=>Math.random().toString(36).slice(2,2+n);
+const initials=n=>esc((n||"?").trim().charAt(0).toUpperCase());
+function lsGet(){try{return localStorage.getItem(LS_KEY)}catch(e){return null}}
+function lsSet(v){try{v?localStorage.setItem(LS_KEY,v):localStorage.removeItem(LS_KEY)}catch(e){}}
+function hkMinutes(){
+  try{const p=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Hong_Kong",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date());
+    const h=+p.find(x=>x.type==="hour").value%24, m=+p.find(x=>x.type==="minute").value; return h*60+m;}
+  catch(e){const d=new Date();return d.getHours()*60+d.getMinutes()}
+}
+function peakInfo(){
+  const mode=S.config.pricingClock||"auto";
+  if(mode==="peak")return{peak:true,label:"rush hour",forced:true};
+  if(mode==="offpeak")return{peak:false,label:"",forced:true};
+  const m=hkMinutes(); const p=PEAKS.find(([a,b])=>m>=a&&m<b);
+  return p?{peak:true,label:p[2],forced:false}:{peak:false,label:"",forced:false};
+}
+function quote(priority){const pk=peakInfo();const base=pk.peak?FEE_PEAK:FEE_OFFPEAK;return{base,peak:pk.peak,label:pk.label,forced:pk.forced,total:base+(priority?FEE_PRIORITY:0)}}
+function mmss(ms){ms=Math.max(0,ms);const s=Math.floor(ms/1000);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+function ago(ts){const d=now()-ts;if(d<60000)return"just now";const m=Math.floor(d/60000);if(m<60)return m+" min ago";const h=Math.floor(m/60);if(h<24)return h+" h ago";return new Date(ts).toLocaleDateString()}
+function fmtTime(ts){return ts?new Date(ts).toLocaleString("en-GB",{timeZone:"Asia/Hong_Kong",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",second:"2-digit"}):""}
+function mins(a,b){return(a&&b)?((b-a)/60000):null}
+function fmtMin(v){return v==null?"–":v.toFixed(1)}
+function median(a){if(!a.length)return null;const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2}
+function shortId(s){let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))|0;return"u"+(h>>>0).toString(36).slice(0,5)}
+function me(){return S.me?S.profiles[S.me]:null}
+function canDeliver(p){return p&&(p.role==="deliver"||p.role==="both")}
+function canOrder(p){return p&&(p.role==="order"||p.role==="both")}
+function ev(name,details){const p=me();return{["e"+now()+rid(4)]:{t:now(),ev:name,by:S.me||"",byName:p?p.name:"",details:details||""}}}
+function toast(msg){S.toast=msg;renderToast();clearTimeout(toast._t);toast._t=setTimeout(()=>{S.toast="";renderToast()},2600)}
+const ICON={
+  bag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12l1 13H5L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>',
+  run:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="4.5" r="2"/><path d="M8 21l3-6 3 2v4M6 12l3-3 4 1 3 4h3M11 15l-2-4"/></svg>',
+  me:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
+  data:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  star:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3L2.8 9.5l6.4-.8z"/></svg>'
+};
+
+/* ---------- derived data ---------- */
+function ordersArr(){return Object.values(S.orders)}
+function runnerStats(id){
+  const del=ordersArr().filter(o=>o.runnerId===id&&o.status==="delivered");
+  const rs=del.map(o=>o.ratingByCustomer).filter(Boolean);
+  return{n:del.length,earn:del.reduce((s,o)=>s+(o.fee-PLATFORM_FEE),0),rating:rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null,nr:rs.length};
+}
+function myActiveOrder(){
+  return ordersArr().filter(o=>o.customerId===S.me&&(["open","accepted","picked_up"].includes(o.status)||(o.status==="delivered"&&!o.custDone)))
+    .sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
+}
+function myActiveJob(){
+  return ordersArr().filter(o=>o.runnerId===S.me&&(["accepted","picked_up"].includes(o.status)||(o.status==="delivered"&&!o.runnerDone)))
+    .sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
+}
+function offerActive(o){return o.variant==="B"&&o.offeredTo&&now()<o.offeredUntil}
+function visibleToRunner(o,p){
+  if(o.status!=="open"||!p||!p.available||o.hall!==p.hall||o.customerId===p.id)return false;
+  if(offerActive(o)&&o.offeredTo!==p.id)return false;
+  return true;
+}
+function availableRunners(hall,exclude){return Object.values(S.profiles).filter(p=>p.hall===hall&&p.available&&canDeliver(p)&&p.id!==exclude)}
+function phaseKey(){
+  /* changes when a time boundary flips something on screen */
+  return ordersArr().map(o=>o.id+":"+(offerActive(o)?1:0)+(o.status==="open"&&now()-o.createdAt>=ALERT_MS?1:0)).join("|")+"|"+peakInfo().peak;
+}
+
+/* ---------- db writes ---------- */
+async function guard(fn){
+  if(S.busy)return; S.busy=true;
+  try{await fn()}
+  catch(e){
+    const c=e&&e.code;
+    if(c==="invalid_argument"&&S.canWrite!==true){S.canWrite=false;toast("You can view this prototype but not change it. Ask the owner for Contributor access.")}
+    else if(c==="quota_exceeded")toast("The test database is full. Reset test data from Team data.");
+    else toast("Couldn't save that. Check your connection and try again.");
+    console.error(e);
+  }
+  finally{S.busy=false;render()}
+}
+const orderRef=id=>S.db.doc("orders/"+id);
+const profRef=id=>S.db.doc("profiles/"+id);
+
+async function doSignupStep1(){
+  const email=S.signup.email.trim().toLowerCase(), name=S.signup.name.trim();
+  if(!email.endsWith(DOMAIN)||email.length<=DOMAIN.length||/\s/.test(email)){S.signup.err="USTBites is only for HKUST students. Use your "+DOMAIN+" email.";return render()}
+  if(!name){S.signup.err="Add your first name so runners and customers know who you are.";return render()}
+  S.signup.err="";S.signup.email=email;S.signup.name=name;
+  if(S.profiles[email]){S.me=email;lsSet(email);S.tab=canOrder(S.profiles[email])?"order":"deliver";toast("Welcome back, "+S.profiles[email].name);return render()}
+  S.signup.step=2;render();
+}
+async function doSignupStep2(){
+  if(!S.signup.hall){S.signup.err="Pick your hall.";return render()}
+  await guard(async()=>{
+    const id=S.signup.email, t=now();
+    const p={id,email:id,name:S.signup.name,hall:S.signup.hall,role:S.signup.role,available:false,createdAt:t,
+      log:{["e"+t+rid(4)]:{t,ev:"signup",by:id,byName:S.signup.name,details:S.signup.hall+" · "+S.signup.role}}};
+    await profRef(id).set(p);
+    S.profiles[id]=p;S.me=id;lsSet(id);S.tab=canOrder(p)?"order":"deliver";S.signup={step:1,email:"",name:"",hall:"",role:"both",err:""};
+    toast("Account created");
+  });
+}
+async function postRequest(){
+  const f=S.form,err={};
+  if(!f.pickup.trim())err.pickup="Type the number on your canteen receipt so the runner can find your bag.";
+  if(!f.room.trim())err.room="Add your floor and room so the runner knows which door to knock on.";
+  f.err=err; if(Object.keys(err).length)return render();
+  const p=me(); const q=quote(f.priority);
+  await guard(async()=>{
+    const id="o"+now().toString(36)+rid(3), t=now();
+    const variant=Math.random()<0.5?"A":"B";
+    let offeredTo=null,offeredToName="",offeredUntil=null,offerNote="";
+    if(variant==="B"){
+      const pool=availableRunners(p.hall,p.id);
+      if(pool.length){const r=pool[Math.floor(Math.random()*pool.length)];offeredTo=r.id;offeredToName=r.name;offeredUntil=t+OFFER_MS;offerNote="offered first to "+r.name}
+      else offerNote="no runner available to offer first, shown to everyone";
+    }
+    const code=String(Math.floor(1000+Math.random()*9000));
+    const o={id,customerId:p.id,customerName:p.name,hall:p.hall,canteen:f.canteen,pickup:f.pickup.trim(),room:f.room.trim(),
+      priority:!!f.priority,fee:q.total,peak:q.peak,pricingForced:q.forced,status:"open",code,variant,offeredTo,offeredToName,offeredUntil,
+      createdAt:t,runnerId:null,runnerName:"",
+      log:{["e"+t+rid(4)]:{t,ev:"request_posted",by:p.id,byName:p.name,details:`variant ${variant} · HK$${q.total}${f.priority?" · priority":""}${offerNote?" · "+offerNote:""}`}}};
+    await orderRef(id).set(o);
+    S.orders[id]=o;
+    S.form={canteen:f.canteen,pickup:"",room:f.room,priority:false,err:{},roomTouched:f.roomTouched};
+    toast("Request posted to "+p.hall);
+  });
+}
+async function cancelOrder(o){
+  await guard(async()=>{
+    const s=await orderRef(o.id).get(); const d=s.data();
+    if(!d||d.status!=="open"){toast("A runner already accepted this one.");return}
+    await orderRef(o.id).update({status:"cancelled",cancelledAt:now(),custDone:true,log:ev("cancelled",now()-o.createdAt>=ALERT_MS?"after no-runner alert":"")});
+    S.confirmCancel=null;
+  });
+}
+async function acceptOrder(o){
+  const p=me();
+  await guard(async()=>{
+    const ref=orderRef(o.id);
+    const lease=await ref.acquire({holder:p.id,ttlMs:5000});
+    if(!lease.acquired){toast("Another runner is taking this one.");await ref.update({log:ev("accept_blocked","lost the race")}).catch(()=>{});return}
+    const s=await ref.get(); const d=s.data();
+    if(!d||d.status!=="open"||d.runnerId){toast(d&&d.runnerName?d.runnerName+" already took this one.":"This request is no longer open.");await ref.update({log:ev("accept_blocked","already taken")}).catch(()=>{});return}
+    if(d.variant==="B"&&d.offeredTo&&now()<d.offeredUntil&&d.offeredTo!==p.id){toast("This one is offered to another runner first.");return}
+    await ref.update({status:"accepted",runnerId:p.id,runnerName:p.name,acceptedAt:now(),log:ev("accepted",mmss(now()-d.createdAt)+" after posting")});
+    S.code="";S.codeErr="";
+  });
+}
+async function pickedUp(o){await guard(()=>orderRef(o.id).update({status:"picked_up",pickedAt:now(),log:ev("picked_up","")}))}
+async function confirmCode(o){
+  const c=S.code.trim();
+  if(!/^\d{4}$/.test(c)){S.codeErr="Type the 4 digits shown on "+o.customerName+"'s phone.";return render()}
+  await guard(async()=>{
+    const s=await orderRef(o.id).get(); const d=s.data();
+    if(c!==d.code){S.codeErr="That code doesn't match. Ask "+o.customerName+" to check their screen.";await orderRef(o.id).update({log:ev("code_wrong","")});return}
+    await orderRef(o.id).update({status:"delivered",deliveredAt:now(),log:ev("delivered",mmss(now()-d.createdAt)+" after posting")});
+    S.code="";S.codeErr="";
+  });
+}
+async function finishCustomer(o){
+  const r=S.rate[o.id+"c"]||null, sc=S.score[o.id]||null;
+  await guard(async()=>{
+    const upd={custDone:true};
+    const logs={};
+    if(r){upd.ratingByCustomer=r;Object.assign(logs,ev("rated_runner",r+"/5"))}
+    if(sc){upd.appScore=sc;Object.assign(logs,ev("app_score",sc+"/10"))}
+    if(Object.keys(logs).length)upd.log=logs;
+    await orderRef(o.id).update(upd);
+    toast("Thanks! Your next request is one tap away.");
+  });
+}
+async function finishRunner(o){
+  const r=S.rate[o.id+"r"]||null;
+  await guard(async()=>{
+    const upd={runnerDone:true};
+    if(r){upd.ratingByRunner=r;upd.log=ev("rated_customer",r+"/5")}
+    await orderRef(o.id).update(upd);
+  });
+}
+async function setAvailable(on){
+  const p=me();
+  await guard(()=>profRef(p.id).update({available:on,availableSince:on?now():null,log:ev(on?"available_on":"available_off",p.hall)}));
+}
+async function saveProfile(field,value){
+  const p=me(); const upd={[field]:value,log:ev("profile_updated",field+" → "+value)};
+  if(field==="role"&&value==="order")upd.available=false;
+  await guard(()=>profRef(p.id).update(upd));
+  if(field==="role"){S.tab=value==="deliver"?"deliver":(value==="order"?"order":S.tab)}
+}
+async function setPricingClock(v){await guard(()=>S.db.doc("config/settings").set({pricingClock:v,changedAt:now(),changedBy:S.me||""}))}
+async function resetData(){
+  if(S.confirmReset!=="RESET")return;
+  await guard(async()=>{
+    for(const id of Object.keys(S.orders))await orderRef(id).delete();
+    for(const id of Object.keys(S.profiles))await profRef(id).delete();
+    S.confirmReset="";lsSet(null);S.me=null;S.screen=null;toast("Test data cleared");
+  });
+}
+function noRunnerCheck(){
+  /* the customer's own device logs the 10-minute alert once */
+  const o=myActiveOrder();
+  if(!o||o.status!=="open"||o.noRunnerAt||S.alertLogged.has(o.id))return;
+  if(now()-o.createdAt>=ALERT_MS){S.alertLogged.add(o.id);orderRef(o.id).update({noRunnerAt:now(),log:ev("no_runner_10min","")}).catch(()=>{})}
+}
+
+/* ---------- CSV ---------- */
+function csvCell(v){v=v==null?"":String(v);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
+function eventsRows(){
+  const rows=[];
+  for(const o of ordersArr())for(const e of Object.values(o.log||{}))rows.push({t:e.t,ev:e.ev,by:e.by,byName:e.byName,order:o.id,variant:o.variant,hall:o.hall,details:e.details});
+  for(const p of Object.values(S.profiles))for(const e of Object.values(p.log||{}))rows.push({t:e.t,ev:e.ev,by:e.by,byName:e.byName,order:"",variant:"",hall:p.hall,details:e.details});
+  return rows.sort((a,b)=>b.t-a.t);
+}
+function eventsCsv(){
+  const h=["time_hk","timestamp_ms","event","user_id","user_name","order_id","ab_variant","hall","details"];
+  const r=eventsRows().slice().reverse().map(e=>[fmtTime(e.t),e.t,e.ev,shortId(e.by),e.byName,e.order,e.variant,e.hall,e.details]);
+  return[h,...r].map(x=>x.map(csvCell).join(",")).join("\n");
+}
+function ordersCsv(){
+  const h=["order_id","posted_hk","hall","canteen","priority","fee_hkd","peak","ab_variant","offered_first_to","status","customer","runner","min_to_accept","accepted_within_5min","min_to_pickup","min_request_to_door","no_runner_alert","rating_of_runner","rating_of_customer","app_score_10"];
+  const r=ordersArr().sort((a,b)=>a.createdAt-b.createdAt).map(o=>{const ma=mins(o.createdAt,o.acceptedAt);return[o.id,fmtTime(o.createdAt),o.hall,o.canteen,o.priority?"yes":"no",o.fee,o.peak?"yes":"no",o.variant,o.offeredToName||"",o.status,o.customerName,o.runnerName,ma==null?"":ma.toFixed(2),ma!=null&&ma<=5?"yes":"no",o.pickedAt?mins(o.createdAt,o.pickedAt).toFixed(2):"",o.deliveredAt?mins(o.createdAt,o.deliveredAt).toFixed(2):"",o.noRunnerAt?"yes":"no",o.ratingByCustomer||"",o.ratingByRunner||"",o.appScore||""]});
+  return[h,...r].map(x=>x.map(csvCell).join(",")).join("\n");
+}
+async function download(kind){
+  const data=kind==="events"?eventsCsv():ordersCsv(), filename="ustbites-"+kind+"-"+new Date().toISOString().slice(0,10)+".csv";
+  if(S.dl){try{await S.dl.save({filename,data});toast("Saved "+filename);return}catch(e){if(e&&e.code==="declined")return}}
+  if(!window.claude){try{const u=URL.createObjectURL(new Blob([data],{type:"text/csv"}));const l=document.createElement("a");l.href=u;l.download=filename;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);toast("Downloaded "+filename);return}catch(e){}}
+  S.csv={filename,data};render();
+}
+
+/* ---------- views ---------- */
+function stepper(o){
+  const order=["open","accepted","picked_up","delivered"],labels=["Requested","Accepted","Picked up","Delivered"];
+  const i=order.indexOf(o.status);
+  return`<div class="steps">${labels.map((l,k)=>`<div class="st ${k<i||(k===i&&o.status==="delivered")?"done":""} ${k===i&&o.status!=="delivered"?"now":""}"><i></i>${l}</div>`).join("")}</div>`;
+}
+function starsHtml(key){
+  const v=S.rate[key]||0;
+  return`<div class="stars" role="group" aria-label="Rating">${[1,2,3,4,5].map(n=>`<button data-act="star" data-key="${key}" data-v="${n}" aria-pressed="${n<=v}" aria-label="${n} star${n>1?"s":""}">${ICON.star}</button>`).join("")}</div>`;
+}
+function personCard(name,sub){return`<div class="person"><div class="av">${initials(name)}</div><div class="grow"><b>${esc(name)}</b><div class="muted small">${sub}</div></div></div>`}
+function ratingLine(id){const r=runnerStats(id);return r.rating?`★ ${r.rating.toFixed(1)} · ${r.n} deliver${r.n===1?"y":"ies"}`:(r.n?`${r.n} deliver${r.n===1?"y":"ies"} · not rated yet`:"New runner")}
+
+function viewSignup(){
+  const s=S.signup;
+  if(s.step===1)return`
+  <div class="hero"><div class="word">UST<b>Bites</b></div><h1>Canteen food, brought to your floor by a hallmate.</h1>
+  <p class="muted">Order at the canteen as usual. A student from your hall who's heading back anyway brings it to your door.</p></div>
+  <div class="card">
+    <label class="f">HKUST email<input id="su-email" type="email" autocomplete="email" placeholder="name${DOMAIN}" value="${esc(s.email)}" class="${s.err&&s.err.includes("HKUST")?"err":""}"></label>
+    <label class="f">First name<input id="su-name" type="text" autocomplete="given-name" placeholder="Leo" value="${esc(s.name)}"></label>
+    ${s.err?`<p class="errmsg" role="alert">${esc(s.err)}</p>`:""}
+    <button class="btn" data-act="su1">Continue</button>
+    <p class="muted small">Only ${DOMAIN} emails can join. Prototype: we check the email address; sending a verification email isn't built yet.</p>
+  </div>`;
+  return`
+  <div class="hero"><h3>Step 2 of 2</h3><h1>Hi ${esc(s.name)}. Where do you live, and what do you want to do?</h1></div>
+  <div class="card">
+    <label class="f">Your hall<span class="hint">Requests only go to runners in the same hall.</span>
+      <select id="su-hall"><option value="">Choose your hall</option>${HALLS.map(h=>`<option ${s.hall===h?"selected":""}>${h}</option>`).join("")}</select></label>
+    <div class="stack"><b>I want to</b>
+      <div class="seg">${[["order","Order"],["deliver","Deliver"],["both","Both"]].map(([v,l])=>`<button data-act="su-role" data-v="${v}" aria-pressed="${s.role===v}">${l}</button>`).join("")}</div>
+      <p class="muted small">You can switch any time in your profile.</p></div>
+    ${s.err?`<p class="errmsg" role="alert">${esc(s.err)}</p>`:""}
+    <button class="btn" data-act="su2">Create account</button>
+    <button class="linkbtn" data-act="su-back">Use a different email</button>
+  </div>`;
+}
+
+function viewOrder(){
+  const p=me();
+  if(!canOrder(p))return`<div class="empty"><b>Ordering is switched off</b><span>Set "I want to" to Order or Both in your profile.</span></div>`;
+  const o=myActiveOrder();
+  if(o)return viewTracker(o);
+  if(!S.form.room&&!S.form.roomTouched){const last=ordersArr().filter(x=>x.customerId===S.me).sort((a,b)=>b.createdAt-a.createdAt)[0];if(last)S.form.room=last.room}
+  const f=S.form,q=quote(f.priority),pool=availableRunners(p.hall,p.id).length;
+  const past=ordersArr().filter(x=>x.customerId===S.me&&x.custDone).sort((a,b)=>b.createdAt-a.createdAt).slice(0,4);
+  return`
+  <div class="stack"><h1>Get your canteen order brought up</h1>
+    <div class="row"><span class="chip">${ICON.bag.replace('<svg','<svg width="14" height="14"')} To ${esc(p.hall)}</span><span class="chip ${pool?"on":""}"><span class="dot"></span>${pool} runner${pool===1?"":"s"} available</span></div></div>
+  <div class="card">
+    <div class="stack"><b>Canteen</b><div class="seg">${CANTEENS.map(c=>`<button data-act="canteen" data-v="${esc(c)}" aria-pressed="${f.canteen===c}">${esc(c)}</button>`).join("")}</div></div>
+    <label class="f">Pickup number<span class="hint">The number on your canteen receipt, so the runner knows which bag is yours.</span>
+      <input id="f-pickup" type="text" inputmode="text" autocomplete="off" placeholder="e.g. 128" value="${esc(f.pickup)}" class="${f.err.pickup?"err":""}">
+      ${f.err.pickup?`<span class="errmsg" role="alert">${esc(f.err.pickup)}</span>`:""}</label>
+    <label class="f">Floor and room<input id="f-room" type="text" autocomplete="off" placeholder="e.g. 12/F, room 1205" value="${esc(f.room)}" class="${f.err.room?"err":""}">
+      ${f.err.room?`<span class="errmsg" role="alert">${esc(f.err.room)}</span>`:""}</label>
+    <button class="toggle" data-act="priority" aria-pressed="${f.priority}"><span class="grow"><b>Priority +HK$${FEE_PRIORITY}</b><br><span class="muted small">Goes to the top of runners' lists.</span></span><span class="sw"></span></button>
+  </div>
+  <div class="card">
+    <div class="price">
+      <div class="ln"><span>${q.peak?"Rush-hour fee"+(q.label&&!q.forced?" ("+q.label+")":""):"Standard fee"}</span><span>HK$${q.base}</span></div>
+      ${f.priority?`<div class="ln"><span>Priority</span><span>+HK$${FEE_PRIORITY}</span></div>`:""}
+      <div class="tot"><span>You pay your runner</span><b>HK$${q.total}</b></div>
+    </div>
+    <div class="sched"><span class="chip ${!q.peak?"on":""}">Usually HK$${FEE_OFFPEAK}</span><span class="chip ${q.peak?"pri":""}">Lunch &amp; dinner rush HK$${FEE_PEAK}</span>${q.forced?`<span class="chip test">Test pricing: ${q.peak?"rush":"off-peak"}</span>`:""}</div>
+    <button class="btn" data-act="post">Post request · HK$${q.total}</button>
+    <p class="muted small">Pay the runner directly (PayMe, FPS or cash) when your food arrives.</p>
+  </div>
+  ${past.length?`<div class="stack"><h3>Your past requests</h3>${past.map(x=>`<div class="flat"><div class="row"><span class="grow"><b>${esc(x.canteen)}</b> <span class="muted small">· ${ago(x.createdAt)}</span></span><span class="chip ${x.status==="delivered"?"on":""}">${x.status==="delivered"?"Delivered by "+esc(x.runnerName):"Cancelled"}</span></div></div>`).join("")}</div>`:""}`;
+}
+
+function viewTracker(o){
+  const elapsed=now()-o.createdAt, late=o.status==="open"&&elapsed>=ALERT_MS&&!S.waiting.has(o.id);
+  let head="",body="";
+  if(o.status==="open"){
+    head=`<div class="row"><span class="ping" aria-hidden="true"></span><h2 class="grow">Finding a runner in ${esc(o.hall)}…</h2></div>
+      <p class="muted">Posted <span class="mono" data-since="${o.createdAt}">${mmss(elapsed)}</span> ago. Runners in your hall see it the moment they're available.</p>`;
+    body=late?`<div class="banner warn" role="status"><b>No runner has taken this yet.</b><p>Nobody in ${esc(o.hall)} seems to be heading back right now. You can keep waiting, or cancel and walk down yourself.</p>
+      ${S.confirmCancel===o.id?`<div class="row"><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`:`<div class="row"><button class="btn warn sm" data-act="cancel" data-id="${o.id}">Cancel request</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`}</div>`
+      :(S.confirmCancel===o.id?`<div class="row"><span class="grow">Cancel this request?</span><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel</button><button class="btn ghost sm" data-act="cancel-no">No</button></div>`:`<button class="linkbtn" data-act="cancel" data-id="${o.id}">Cancel request</button>`);
+  }else if(o.status==="accepted"||o.status==="picked_up"){
+    head=`<h2>${o.status==="accepted"?"Accepted by "+esc(o.runnerName):esc(o.runnerName)+" picked up your food and is on the way"}</h2>
+      ${personCard(o.runnerName,ratingLine(o.runnerId)+(o.status==="accepted"?" · heading to "+esc(o.canteen):" · coming to "+esc(o.hall)))}`;
+    body=`<div class="ticket code"><span class="lbl">Your handoff code</span><span class="big mono">${esc(o.code)}</span><span class="small" style="opacity:.85">Show this at your door once you have your food.</span></div>`;
+  }else{
+    const r=S.rate[o.id+"c"]||0, sc=S.score[o.id]||0;
+    head=`<h2>Delivered. Enjoy your food!</h2>
+      <div class="banner ok"><b>Pay ${esc(o.runnerName)} HK$${o.fee} directly</b><span class="small">PayMe, FPS or cash. ${esc(o.runnerName)} keeps HK$${o.fee-PLATFORM_FEE}; HK$${PLATFORM_FEE} is the USTBites fee.</span></div>`;
+    body=`<div class="stack"><b>Rate ${esc(o.runnerName)}</b>${starsHtml(o.id+"c")}</div>
+      <div class="stack"><b>How easy was USTBites to use?</b><div class="scale">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button data-act="score" data-id="${o.id}" data-v="${n}" aria-pressed="${sc===n}">${n}</button>`).join("")}</div><div class="row muted small"><span class="grow">1 = very hard</span><span>10 = very easy</span></div></div>
+      <button class="btn" data-act="cust-done" data-id="${o.id}">${r||sc?"Send and finish":"Finish"}</button>`;
+  }
+  return`<div class="card">${stepper(o)}${head}</div>
+  <div class="ticket"><span class="lbl">${esc(o.canteen)} · pickup number</span><span class="big">${esc(o.pickup)}</span><span class="muted small">${esc(o.hall)} · ${esc(o.room)} · HK$${o.fee}${o.priority?" · Priority":""}</span></div>
+  ${body?`<div class="card">${body}</div>`:""}`;
+}
+
+function viewDeliver(){
+  const p=me();
+  if(!canDeliver(p))return`<div class="empty"><b>Delivering is switched off</b><span>Set "I want to" to Deliver or Both in your profile.</span></div>`;
+  const job=myActiveJob(), st=runnerStats(p.id);
+  const stats=`<div class="row muted small"><span class="grow">${st.n} deliver${st.n===1?"y":"ies"} · HK$${st.earn} earned${st.rating?" · ★ "+st.rating.toFixed(1):""}</span></div>`;
+  if(job)return viewJob(job)+stats;
+  const toggle=`<button class="toggle avail" data-act="avail" aria-pressed="${!!p.available}"><span class="grow"><b>${p.available?"You're available in "+esc(p.hall):"Available to deliver"}</b><br><span class="muted small">${p.available?"You're in the "+esc(p.hall)+" runner pool.":"Turn on when you're heading back to "+esc(p.hall)+"."}</span></span><span class="sw"></span></button>`;
+  if(!p.available)return toggle+`<div class="empty"><b>You're offline</b><span>You'll only ever see requests from ${esc(p.hall)}: jobs on a walk you're already making.</span></div>`+stats;
+  const list=ordersArr().filter(o=>visibleToRunner(o,p)).sort((a,b)=>(b.priority-a.priority)||(a.createdAt-b.createdAt));
+  return toggle+`<div class="row"><h2 class="grow">Requests in ${esc(p.hall)}</h2><span class="chip">${list.length}</span></div>`+
+   (list.length?list.map(o=>`<div class="req ${o.priority?"priority":""}">
+      <div class="row"><div class="grow"><b>${esc(o.canteen)}</b> → ${esc(o.room)}<div class="muted small">For ${esc(o.customerName)} · posted ${ago(o.createdAt)}</div></div><div class="earn">+HK$${o.fee-PLATFORM_FEE}</div></div>
+      <div class="row">${o.priority?`<span class="chip pri">Priority</span>`:""}${offerActive(o)&&o.offeredTo===p.id?`<span class="chip on">Offered to you first · <span class="mono" data-until="${o.offeredUntil}">${mmss(o.offeredUntil-now())}</span></span>`:""}<span class="grow"></span><button class="btn sm" data-act="accept" data-id="${o.id}">Accept</button></div>
+    </div>`).join(""):`<div class="empty"><b>No requests in ${esc(p.hall)} right now</b><span>New ones appear here the moment they're posted.</span></div>`)+stats;
+}
+
+function viewJob(o){
+  if(o.status==="accepted")return`<div class="card">${stepper(o)}<h2>Go to ${esc(o.canteen)}</h2><p class="muted">Show this pickup number at the counter.</p></div>
+    <div class="ticket"><span class="lbl">Pickup number</span><span class="big">${esc(o.pickup)}</span><span class="muted small">For ${esc(o.customerName)} · ${esc(o.hall)}, ${esc(o.room)}</span></div>
+    <button class="btn" data-act="picked" data-id="${o.id}">I've picked it up</button>`;
+  if(o.status==="picked_up")return`<div class="card">${stepper(o)}<h2>Take it to ${esc(o.room)}</h2>
+    ${personCard(o.customerName,esc(o.hall)+" · "+esc(o.room))}
+    <label class="f">Ask ${esc(o.customerName)} for their 4-digit code<input id="code" class="codein ${S.codeErr?"err":""}" inputmode="numeric" maxlength="4" autocomplete="one-time-code" placeholder="····" value="${esc(S.code)}"></label>
+    ${S.codeErr?`<p class="errmsg" role="alert">${esc(S.codeErr)}</p>`:""}
+    <button class="btn" data-act="code" data-id="${o.id}">Confirm delivery</button></div>`;
+  return`<div class="card">${stepper(o)}<h2>Delivered. Nice one!</h2>
+    <div class="banner ok"><b>You earned HK$${o.fee-PLATFORM_FEE}</b><span class="small">HK$${o.fee} fee minus the HK$${PLATFORM_FEE} USTBites fee. ${esc(o.customerName)} pays you directly.</span></div>
+    <div class="stack"><b>Rate ${esc(o.customerName)}</b>${starsHtml(o.id+"r")}</div>
+    <button class="btn" data-act="run-done" data-id="${o.id}">Done</button></div>`;
+}
+
+function viewProfile(){
+  const p=me(), st=runnerStats(p.id), placed=ordersArr().filter(o=>o.customerId===p.id).length;
+  return`<div class="card"><div class="person"><div class="av">${initials(p.name)}</div><div class="grow"><h2>${esc(p.name)}</h2><div class="muted small">${esc(p.email)}</div></div></div>
+    <div class="tiles"><div class="tile"><span class="lbl">Requests</span><b>${placed}</b></div><div class="tile"><span class="lbl">Deliveries</span><b>${st.n}</b></div>
+    <div class="tile"><span class="lbl">Earned</span><b>HK$${st.earn}</b></div><div class="tile"><span class="lbl">Rating</span><b>${st.rating?"★ "+st.rating.toFixed(1):"–"}</b></div></div></div>
+  <div class="card"><label class="f">Hall<select id="pf-hall">${HALLS.map(h=>`<option ${p.hall===h?"selected":""}>${h}</option>`).join("")}</select></label>
+    <div class="stack"><b>I want to</b><div class="seg">${[["order","Order"],["deliver","Deliver"],["both","Both"]].map(([v,l])=>`<button data-act="pf-role" data-v="${v}" aria-pressed="${p.role===v}">${l}</button>`).join("")}</div></div></div>
+  <div class="row"><button class="btn ghost" data-act="data">${ICON.data.replace('<svg','<svg width="18" height="18"')} Team data</button><button class="btn ghost" data-act="signout">Switch account</button></div>`;
+}
+
+function viewData(){
+  const os=ordersArr(), pk=peakInfo(), mode=S.config.pricingClock||"auto";
+  const delivered=os.filter(o=>o.status==="delivered");
+  const med=median(delivered.map(o=>mins(o.createdAt,o.deliveredAt)));
+  const scores=os.map(o=>o.appScore).filter(Boolean);
+  const ab=["A","B"].map(v=>{const g=os.filter(o=>o.variant===v);
+    const acc5=g.filter(o=>o.acceptedAt&&o.acceptedAt-o.createdAt<=SUCCESS_MS).length;
+    const fail=g.filter(o=>o.noRunnerAt||(!o.acceptedAt&&o.status==="open"&&now()-o.createdAt>=ALERT_MS)).length;
+    const canc=g.filter(o=>o.status==="cancelled").length;
+    return{v,n:g.length,acc5,fail,canc,rate:g.length?(acc5/g.length*10):null}});
+  const flags=[];
+  for(const o of os){if(o.ratingByCustomer&&o.ratingByCustomer<=2)flags.push({who:o.runnerName,role:"runner",r:o.ratingByCustomer,by:o.customerName,o});
+    if(o.ratingByRunner&&o.ratingByRunner<=2)flags.push({who:o.customerName,role:"customer",r:o.ratingByRunner,by:o.runnerName,o})}
+  const evs=eventsRows();
+  return`<div class="row"><button class="linkbtn" data-act="data-back">← Back</button></div>
+  <div class="stack"><h1>Team data</h1><p class="muted">Every post, accept, pickup and delivery is logged with who, which order and when. Download it as a spreadsheet.</p></div>
+  <div class="row"><button class="btn sm" data-act="dl" data-v="events">Download event log (CSV)</button><button class="btn ghost sm" data-act="dl" data-v="orders">Orders (CSV)</button></div>
+  ${S.csv?`<div class="card"><b>${esc(S.csv.filename)}</b><p class="muted small">Downloads aren't available in this view. Copy the text below into a .csv file.</p><textarea id="csvbox" readonly>${esc(S.csv.data)}</textarea><div class="row"><button class="btn sm" data-act="copycsv">Copy</button><button class="btn ghost sm" data-act="closecsv">Close</button></div></div>`:""}
+  <div class="tiles">
+    <div class="tile"><span class="lbl">Requests</span><b>${os.length}</b></div>
+    <div class="tile"><span class="lbl">Delivered</span><b>${delivered.length}</b></div>
+    <div class="tile"><span class="lbl">Median request → door</span><b>${med==null?"–":med.toFixed(1)+" min"}</b></div>
+    <div class="tile"><span class="lbl">Ease score</span><b>${scores.length?(scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1)+"/10":"–"}</b><span class="muted small">${scores.length} answer${scores.length===1?"":"s"}</span></div>
+  </div>
+  <div class="stack"><h3>A/B test · who sees a request first</h3>
+  <p class="muted small">Each request flips a coin. A: every available runner in the hall sees it at once. B: one available runner gets it for 3 minutes, then everyone. Success = accepted within 5 minutes; no runner after 10 minutes = failure. All assigned requests count.</p>
+  <div class="tbl"><table><thead><tr><th>Version</th><th>Requests</th><th>Accepted ≤5 min</th><th>Per 10</th><th>No runner 10 min</th><th>Cancelled</th></tr></thead><tbody>
+  ${ab.map(r=>`<tr><td><b>${r.v}</b></td><td>${r.n}</td><td>${r.acc5}</td><td>${r.rate==null?"–":r.rate.toFixed(1)}</td><td>${r.fail}</td><td>${r.canc}</td></tr>`).join("")}</tbody></table></div>
+  <p class="muted small">Decision rule: continue with B if it gets at least 2 more accepted per 10 requests without more cancellations; mixed results, revise; B worse, keep A.</p></div>
+  <div class="stack"><h3>Flagged for a team check (rating ≤ 2)</h3>
+  ${flags.length?flags.map(f=>`<div class="flat"><div class="row"><span class="grow"><b>${esc(f.who)}</b> <span class="muted small">(${f.role})</span> got ${f.r}/5 from ${esc(f.by)}</span><span class="muted small">${ago(f.o.deliveredAt||f.o.createdAt)}</span></div></div>`).join(""):`<p class="muted small">Nobody flagged. A low rating doesn't remove anyone; it puts them here for a person on the team to check.</p>`}</div>
+  <div class="stack"><h3>Orders</h3><div class="tbl"><table><thead><tr><th>Posted</th><th>Hall</th><th>Var.</th><th>Fee</th><th>Status</th><th>Customer</th><th>Runner</th><th>Min to accept</th><th>Min to door</th></tr></thead><tbody>
+  ${os.length?os.sort((a,b)=>b.createdAt-a.createdAt).map(o=>`<tr><td>${fmtTime(o.createdAt)}</td><td>${esc(o.hall)}</td><td>${o.variant}</td><td>${o.fee}${o.priority?" P":""}</td><td>${o.status.replace("_"," ")}</td><td>${esc(o.customerName)}</td><td>${esc(o.runnerName)}</td><td>${fmtMin(mins(o.createdAt,o.acceptedAt))}</td><td>${fmtMin(mins(o.createdAt,o.deliveredAt))}</td></tr>`).join(""):`<tr><td colspan="9" class="muted">No orders yet.</td></tr>`}</tbody></table></div></div>
+  <div class="stack"><h3>Event log · newest first</h3><div class="tbl"><table><thead><tr><th>Time (HK)</th><th>Event</th><th>Who</th><th>Order</th><th>Details</th></tr></thead><tbody>
+  ${evs.length?evs.slice(0,150).map(e=>`<tr><td>${fmtTime(e.t)}</td><td><b>${esc(e.ev)}</b></td><td>${esc(e.byName)}</td><td class="mono">${esc(e.order)}</td><td>${esc(e.details)}</td></tr>`).join(""):`<tr><td colspan="5" class="muted">Nothing logged yet.</td></tr>`}</tbody></table></div>${evs.length>150?`<p class="muted small">Showing 150 of ${evs.length}. The CSV has all of them.</p>`:""}</div>
+  <div class="card"><b>Pricing clock (for testing)</b><p class="muted small">Auto uses Hong Kong time: HK$${FEE_PEAK} from 11:30 to 14:00 and 17:30 to 20:30, HK$${FEE_OFFPEAK} otherwise. Forcing it shows a red "Test pricing" label on the request screen. It's now ${pk.peak?"rush hour":"off-peak"}.</p>
+    <div class="seg">${[["auto","Auto"],["peak","Force rush"],["offpeak","Force off-peak"]].map(([v,l])=>`<button data-act="clock" data-v="${v}" aria-pressed="${mode===v}">${l}</button>`).join("")}</div></div>
+  <div class="card"><b>Reset test data</b><p class="muted small">Deletes every order and account so you can start your real tests clean. Download the CSV first. Type RESET to confirm.</p>
+    <div class="row"><input id="reset" type="text" autocomplete="off" placeholder="RESET" value="${esc(S.confirmReset)}"><button class="btn warn sm" data-act="reset" ${S.confirmReset==="RESET"?"":"disabled"}>Delete all</button></div></div>`;
+}
+
+function viewGate(){
+  if(S.dbState==="setup")return`<div class="hero"><div class="word">UST<b>Bites</b></div></div><div class="card"><h2>Almost there: connect the database</h2><p class="muted">Paste your Firebase web config into <span class="mono">config.js</span> in the GitHub repository, then reload. The README explains each step.</p></div>`;
+  if(S.dbState==="none")return`<div class="hero"><div class="word">UST<b>Bites</b></div></div><div class="card"><h2>Open this prototype in Claude</h2><p class="muted">USTBites keeps orders in a shared live database, which works when this page is opened at its claude.ai link while signed in. Ask the owner to share it with you as a Contributor or Editor.</p></div>`;
+  return`<div class="hero"><div class="word">UST<b>Bites</b></div></div><div class="card"><div class="row"><span class="ping"></span><b>Loading orders…</b></div>${S.slow?`<p class="muted small">Can't reach the data yet. Check your connection; this page keeps trying.</p>`:""}${S.dbErr?`<p class="errmsg">The database refused access (${esc(S.dbErr)}). Check the Firestore rules in the README.</p>`:""}</div>`;
+}
+
+/* ---------- render ---------- */
+let lastMain="",lastTop="",lastNav="";
+function render(){
+  const app=$("#app");
+  if(!app.firstChild)app.innerHTML=`<header class="top" id="top"></header><main id="main"></main><nav class="nav" id="nav" aria-label="Main"></nav><div id="toast"></div>`;
+  const ready=S.db&&S.loaded.p&&S.loaded.o&&!(S.dbErr&&!Object.keys(S.profiles).length&&S.backend==="firebase");
+  if(S.me&&ready&&!S.profiles[S.me]){S.me=null;lsSet(null)}
+  const p=ready?me():null;
+  let top=`<span class="word">UST<b>Bites</b></span><span class="sp"></span>`;
+  if(p)top+=`<span class="chip">${esc(p.hall)}</span>${canDeliver(p)?`<span class="chip ${p.available?"on":""}"><span class="dot"></span>${p.available?"Available":"Offline"}</span>`:""}`;
+  if(S.canWrite===false)top+=`<span class="chip test">View only</span>`;
+  let main,nav="";
+  if(!ready)main=viewGate();
+  else if(!p)main=viewSignup();
+  else{
+    if(!S.tabChosen){S.tabChosen=true;if(myActiveJob())S.tab="deliver";else if(myActiveOrder())S.tab="order"}
+    if(S.tab==="order"&&!canOrder(p))S.tab="deliver";
+    if(S.tab==="deliver"&&!canDeliver(p))S.tab="order";
+    main=S.screen==="data"?viewData():S.tab==="order"?viewOrder():S.tab==="deliver"?viewDeliver():viewProfile();
+    const tabs=[];if(canOrder(p))tabs.push(["order","Order",ICON.bag]);if(canDeliver(p))tabs.push(["deliver","Deliver",ICON.run]);tabs.push(["profile","Profile",ICON.me]);
+    nav=`<div class="nav-in">${tabs.map(([k,l,i])=>`<button data-act="tab" data-v="${k}" ${S.tab===k&&S.screen!=="data"?'aria-current="page"':""}>${i}${l}</button>`).join("")}</div>`;
+  }
+  if(top!==lastTop){$("#top").innerHTML=top;lastTop=top}
+  if(nav!==lastNav){$("#nav").innerHTML=nav;$("#nav").hidden=!nav;lastNav=nav}
+  if(main!==lastMain){
+    const a=document.activeElement, id=a&&a.id, ss=a&&a.selectionStart, se=a&&a.selectionEnd;
+    $("#main").innerHTML=main;lastMain=main;
+    if(id){const n=document.getElementById(id);if(n){n.focus();try{if(ss!=null)n.setSelectionRange(ss,se)}catch(e){}}}
+  }
+  renderToast();
+}
+function renderToast(){const t=$("#toast");if(!t)return;t.innerHTML=S.toast?`<div class="toast" role="status">${esc(S.toast)}</div>`:""}
+let lastPhase="";
+setInterval(()=>{
+  document.querySelectorAll("[data-since]").forEach(n=>{n.textContent=mmss(now()-(+n.dataset.since))});
+  document.querySelectorAll("[data-until]").forEach(n=>{n.textContent=mmss((+n.dataset.until)-now())});
+  if(!S.db)return;
+  noRunnerCheck();
+  const k=phaseKey();if(k!==lastPhase){lastPhase=k;render()}
+},1000);
+
+/* ---------- events ---------- */
+document.addEventListener("input",e=>{
+  const t=e.target,id=t.id;
+  if(id==="su-email")S.signup.email=t.value;
+  else if(id==="su-name")S.signup.name=t.value;
+  else if(id==="f-pickup"){S.form.pickup=t.value;if(S.form.err.pickup&&t.value.trim()){delete S.form.err.pickup;render()}}
+  else if(id==="f-room"){S.form.room=t.value;S.form.roomTouched=true;if(S.form.err.room&&t.value.trim()){delete S.form.err.room;render()}}
+  else if(id==="code"){t.value=t.value.replace(/\D/g,"").slice(0,4);S.code=t.value;if(S.codeErr){S.codeErr="";render()}}
+  else if(id==="reset"){S.confirmReset=t.value.trim();render()}
+});
+document.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.id==="su-hall"){S.signup.hall=t.value;S.signup.err=""}
+  else if(t.id==="pf-hall")saveProfile("hall",t.value);
+});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter")return;const id=e.target.id;
+  if(id==="su-email"||id==="su-name")doSignupStep1();
+  else if(id==="code"){const j=myActiveJob();if(j)confirmCode(j)}
+});
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-act]");if(!b)return;
+  const a=b.dataset.act,v=b.dataset.v,id=b.dataset.id,o=id?S.orders[id]:null;
+  switch(a){
+    case"su1":doSignupStep1();break;
+    case"su2":doSignupStep2();break;
+    case"su-role":S.signup.role=v;render();break;
+    case"su-back":S.signup.step=1;S.signup.err="";render();break;
+    case"tab":S.tab=v;S.screen=null;S.csv=null;render();window.scrollTo(0,0);break;
+    case"canteen":S.form.canteen=v;render();break;
+    case"priority":S.form.priority=!S.form.priority;render();break;
+    case"post":postRequest();break;
+    case"cancel":S.confirmCancel=id;render();break;
+    case"cancel-no":S.confirmCancel=null;if(b.dataset.id)S.waiting.add(b.dataset.id);render();break;
+    case"cancel-yes":if(o)cancelOrder(o);break;
+    case"avail":setAvailable(!me().available);break;
+    case"accept":if(o)acceptOrder(o);break;
+    case"picked":if(o)pickedUp(o);break;
+    case"code":if(o)confirmCode(o);break;
+    case"star":S.rate[b.dataset.key]=+v;render();break;
+    case"score":S.score[id]=+v;render();break;
+    case"cust-done":if(o)finishCustomer(o);break;
+    case"run-done":if(o)finishRunner(o);break;
+    case"pf-role":saveProfile("role",v);break;
+    case"signout":lsSet(null);S.me=null;S.screen=null;S.tab="order";render();break;
+    case"data":S.screen="data";render();window.scrollTo(0,0);break;
+    case"data-back":S.screen=null;S.csv=null;render();break;
+    case"dl":download(v);break;
+    case"copycsv":{const ta=$("#csvbox");const txt=S.csv?S.csv.data:"";if(navigator.clipboard)navigator.clipboard.writeText(txt).then(()=>toast("Copied")).catch(()=>{ta.select()});else ta.select();break}
+    case"closecsv":S.csv=null;render();break;
+    case"clock":setPricingClock(v);break;
+    case"reset":resetData();break;
+  }
+});
+
+/* ---------- Firebase adapter (GitHub Pages version) ----------
+   Gives Firestore the same small API the app uses inside Claude: doc().get/set/update/delete/acquire, collection().onSnapshot. */
+function firebaseDb(){
+  const cfg=window.FIREBASE_CONFIG;
+  if(!window.firebase||!cfg||!cfg.apiKey||/PASTE/.test(cfg.apiKey))return null;
+  if(!firebase.apps.length)firebase.initializeApp(cfg);
+  const fs=firebase.firestore();
+  const flat=d=>{const o={};for(const[k,v]of Object.entries(d)){if(k==="log"&&v&&typeof v==="object")for(const[kk,vv]of Object.entries(v))o["log."+kk]=vv;else o[k]=v===undefined?firebase.firestore.FieldValue.delete():v}return o};
+  const wrapDoc=s=>({id:s.id,exists:s.exists,data:()=>s.exists?s.data():undefined,metadata:s.metadata});
+  const doc=path=>{const r=fs.doc(path);return{id:r.id,path,
+    get:async()=>wrapDoc(await r.get()),
+    set:d=>r.set(JSON.parse(JSON.stringify(d))),
+    update:d=>r.update(flat(d)).catch(e=>{throw{code:e.code==="not-found"?"invalid_argument":"unavailable",message:e.message}}),
+    delete:()=>r.delete(),
+    acquire:({holder,ttlMs})=>fs.runTransaction(async tx=>{const lr=fs.doc("leases/"+path.replace(/\//g,"_"));const l=await tx.get(lr);const t=Date.now();
+      if(l.exists&&l.data().exp>t&&l.data().holder!==holder)return{acquired:false};tx.set(lr,{holder,exp:t+(ttlMs||30000)});return{acquired:true}}),
+    onSnapshot:(n,e)=>r.onSnapshot(s=>n(wrapDoc(s)),e)}};
+  const collection=path=>({path,onSnapshot:(n,e)=>fs.collection(path).onSnapshot(q=>n({docs:q.docs.map(wrapDoc),size:q.size,empty:q.empty,metadata:q.metadata}),e)});
+  return{doc,collection};
+}
+
+/* ---------- boot ---------- */
+S.me=lsGet();
+render();
+(async()=>{
+  const c=window.claude;
+  let db=null;
+  if(c&&c.use)db=await c.use("db");
+  else{try{db=firebaseDb();S.backend="firebase"}catch(e){console.error(e)}}
+  if(!db){S.dbState=c&&c.use?"none":"setup";render();return}
+  S.db=db;S.dbState="ok";
+  const slowT=setTimeout(()=>{S.slow=true;render()},10000);
+  const done=()=>{if(S.loaded.p&&S.loaded.o){clearTimeout(slowT);S.slow=false}};
+  const fail=k=>err=>{console.error(err);S.loaded[k]=true;S.dbErr=(err&&err.code)||"error";render()};
+  db.collection("profiles").onSnapshot(snap=>{const m={};snap.docs.forEach(d=>{m[d.id]=Object.assign({id:d.id},d.data())});S.profiles=m;if(!snap.metadata.fromCache||snap.size)S.loaded.p=true;done();render()},fail("p"));
+  db.collection("orders").onSnapshot(snap=>{const m={};snap.docs.forEach(d=>{m[d.id]=Object.assign({id:d.id},d.data())});S.orders=m;if(!snap.metadata.fromCache||snap.size)S.loaded.o=true;done();render()},fail("o"));
+  db.doc("config/settings").onSnapshot(s=>{S.config=s.exists?s.data():{};render()},()=>{});
+  if(c&&c.use){
+    try{const u=await c.use("user");S.user=u;if(u){const w=await u.can("data.write");if(w===false)S.canWrite=false;else if(w===true)S.canWrite=true}}catch(e){}
+    try{S.dl=await c.use("downloads")}catch(e){}
+  }
+  render();
+})();
+})();
+</script>
+
+</body>
+</html>
