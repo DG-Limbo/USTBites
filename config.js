@@ -1,10 +1,10 @@
-// Paste your Firebase web app config here (Firebase console > Project settings > Your apps > SDK setup and configuration > Config).
-// These values identify your project; they are not secret. Access is controlled by the Firestore rules in firestore.rules.
+// Firebase web app config for the ustbites project.
+// These values identify the project; they are not secret. Access is controlled by the Firestore rules in firestore.rules.
 window.FIREBASE_CONFIG = {
-  apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId: "PASTE_APP_ID"
+  apiKey: "AIzaSyDMm6IC5LBUCCZ_Fh2SYJ-Rr639gbNvlJw",
+  authDomain: "ustbites.firebaseapp.com",
+  projectId: "ustbites",
+  storageBucket: "ustbites.firebasestorage.app",
+  messagingSenderId: "909783194957",
+  appId: "1:909783194957:web:a628d14d8e14fcb4e2eb04"
 };
