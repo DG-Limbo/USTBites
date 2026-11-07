@@ -94,6 +94,9 @@ input.err{border-color:var(--bad)}
 .linkbtn{background:none;border:0;color:var(--brand);font-weight:600;cursor:pointer;padding:0;font-size:14px}
 .toggle{display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--r);border:1.5px solid var(--line);background:var(--surface);cursor:pointer;width:100%;text-align:left}
 .toggle[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none}
+[aria-pressed="true"] .radio{border:6px solid var(--accent)}
+.toggle:disabled{opacity:.6;cursor:default}
 .toggle.avail[aria-pressed="true"]{border-color:var(--good);background:var(--good-soft)}
 .sw{width:44px;height:26px;border-radius:13px;background:var(--line);position:relative;flex:none;transition:background .15s}
 .sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
@@ -175,6 +178,7 @@ const PEAKS=[[11*60+30,14*60,"lunch rush"],[17*60+30,20*60+30,"dinner rush"]]; /
 const OFFER_MS=3*60*1000;      // A/B version B: one runner first for 3 minutes
 const ALERT_MS=10*60*1000;     // no runner after 10 minutes
 const SUCCESS_MS=5*60*1000;    // A/B success: accepted within 5 minutes
+const OPEN_ALL_MS=5*60*1000;    // after 5 minutes unaccepted, runners in every hall can see it
 const LS_KEY="ustbites.me";
 
 /* ---------- state ---------- */
@@ -241,16 +245,18 @@ function myActiveJob(){
   return ordersArr().filter(o=>o.runnerId===S.me&&(["accepted","picked_up"].includes(o.status)||(o.status==="delivered"&&!o.runnerDone)))
     .sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
 }
+function openToAll(o){return o.status==="open"&&now()-o.createdAt>=OPEN_ALL_MS}
 function offerActive(o){return o.variant==="B"&&o.offeredTo&&now()<o.offeredUntil}
 function visibleToRunner(o,p){
-  if(o.status!=="open"||!p||!p.available||o.hall!==p.hall||o.customerId===p.id)return false;
+  if(o.status!=="open"||!p||!p.available||o.customerId===p.id)return false;
+  if(o.hall!==p.hall&&!openToAll(o))return false;
   if(offerActive(o)&&o.offeredTo!==p.id)return false;
   return true;
 }
 function availableRunners(hall,exclude){return Object.values(S.profiles).filter(p=>p.hall===hall&&p.available&&canDeliver(p)&&p.id!==exclude)}
 function phaseKey(){
   /* changes when a time boundary flips something on screen */
-  return ordersArr().map(o=>o.id+":"+(offerActive(o)?1:0)+(o.status==="open"&&now()-o.createdAt>=ALERT_MS?1:0)).join("|")+"|"+peakInfo().peak;
+  return ordersArr().map(o=>o.id+":"+(offerActive(o)?1:0)+(openToAll(o)?1:0)+(o.status==="open"&&now()-o.createdAt>=ALERT_MS?1:0)).join("|")+"|"+peakInfo().peak;
 }
 
 /* ---------- db writes ---------- */
@@ -293,6 +299,14 @@ async function postRequest(){
   if(!f.pickup.trim())err.pickup="Type the number on your canteen receipt so the runner can find your bag.";
   if(!f.room.trim())err.room="Add your floor and room so the runner knows which door to knock on.";
   f.err=err; if(Object.keys(err).length)return render();
+  S.pay={method:"",processing:false};render();window.scrollTo(0,0);
+}
+async function payAndPost(){
+  const f=S.form;
+  if(!S.pay||!S.pay.method){S.pay.err="Choose a payment method.";return render()}
+  const method=S.pay.method;
+  S.pay.processing=true;S.pay.err="";render();
+  await new Promise(r=>setTimeout(r,1200)); /* simulated processing: no money moves */
   const p=me(); const q=quote(f.priority);
   await guard(async()=>{
     const id="o"+now().toString(36)+rid(3), t=now();
@@ -306,19 +320,22 @@ async function postRequest(){
     const code=String(Math.floor(1000+Math.random()*9000));
     const o={id,customerId:p.id,customerName:p.name,hall:p.hall,canteen:f.canteen,pickup:f.pickup.trim(),room:f.room.trim(),
       priority:!!f.priority,fee:q.total,peak:q.peak,pricingForced:q.forced,status:"open",code,variant,offeredTo,offeredToName,offeredUntil,
-      createdAt:t,runnerId:null,runnerName:"",
-      log:{["e"+t+rid(4)]:{t,ev:"request_posted",by:p.id,byName:p.name,details:`variant ${variant} · HK$${q.total}${f.priority?" · priority":""}${offerNote?" · "+offerNote:""}`}}};
+      createdAt:t,runnerId:null,runnerName:"",paid:true,payMethod:method,paidAt:t,payRef:"DEMO-"+rid(6).toUpperCase(),
+      log:{["e"+t+rid(4)]:{t,ev:"payment_demo",by:p.id,byName:p.name,details:`HK$${q.total} via ${method} (demo, no money moved)`},
+           ["e"+(t+1)+rid(4)]:{t:t+1,ev:"request_posted",by:p.id,byName:p.name,details:`variant ${variant} · HK$${q.total}${f.priority?" · priority":""}${offerNote?" · "+offerNote:""}`}}};
     await orderRef(id).set(o);
     S.orders[id]=o;
     S.form={canteen:f.canteen,pickup:"",room:f.room,priority:false,err:{},roomTouched:f.roomTouched};
-    toast("Request posted to "+p.hall);
+    S.pay=null;
+    toast("Paid · request posted to "+p.hall);
   });
+  if(S.pay)S.pay.processing=false;render();
 }
 async function cancelOrder(o){
   await guard(async()=>{
     const s=await orderRef(o.id).get(); const d=s.data();
     if(!d||d.status!=="open"){toast("A runner already accepted this one.");return}
-    await orderRef(o.id).update({status:"cancelled",cancelledAt:now(),custDone:true,log:ev("cancelled",now()-o.createdAt>=ALERT_MS?"after no-runner alert":"")});
+    await orderRef(o.id).update({status:"cancelled",cancelledAt:now(),custDone:true,refunded:!!d.paid,log:Object.assign(ev("cancelled",now()-o.createdAt>=ALERT_MS?"after no-runner alert":""),d.paid?ev("refund_demo","HK$"+d.fee+" to "+(d.payMethod||"")):{})});
     S.confirmCancel=null;
   });
 }
@@ -331,7 +348,9 @@ async function acceptOrder(o){
     const s=await ref.get(); const d=s.data();
     if(!d||d.status!=="open"||d.runnerId){toast(d&&d.runnerName?d.runnerName+" already took this one.":"This request is no longer open.");await ref.update({log:ev("accept_blocked","already taken")}).catch(()=>{});return}
     if(d.variant==="B"&&d.offeredTo&&now()<d.offeredUntil&&d.offeredTo!==p.id){toast("This one is offered to another runner first.");return}
-    await ref.update({status:"accepted",runnerId:p.id,runnerName:p.name,acceptedAt:now(),log:ev("accepted",mmss(now()-d.createdAt)+" after posting")});
+    const cross=d.hall!==p.hall;
+    if(cross&&now()-d.createdAt<OPEN_ALL_MS){toast("This request is only open to "+d.hall+" runners for now.");return}
+    await ref.update({status:"accepted",runnerId:p.id,runnerName:p.name,runnerHall:p.hall,crossHall:cross,acceptedAt:now(),log:ev("accepted",mmss(now()-d.createdAt)+" after posting"+(cross?" · runner from "+p.hall:""))});
     S.code="";S.codeErr="";
   });
 }
@@ -386,8 +405,9 @@ async function resetData(){
   });
 }
 function noRunnerCheck(){
-  /* the customer's own device logs the 10-minute alert once */
+  /* the customer's own device logs the 5-minute opening and the 10-minute alert once each */
   const o=myActiveOrder();
+  if(o&&o.status==="open"&&!o.openedAllAt&&!S.alertLogged.has(o.id+"all")&&openToAll(o)){S.alertLogged.add(o.id+"all");orderRef(o.id).update({openedAllAt:now(),log:ev("opened_to_all_halls","no "+o.hall+" runner in 5 min")}).catch(()=>{})}
   if(!o||o.status!=="open"||o.noRunnerAt||S.alertLogged.has(o.id))return;
   if(now()-o.createdAt>=ALERT_MS){S.alertLogged.add(o.id);orderRef(o.id).update({noRunnerAt:now(),log:ev("no_runner_10min","")}).catch(()=>{})}
 }
@@ -406,8 +426,8 @@ function eventsCsv(){
   return[h,...r].map(x=>x.map(csvCell).join(",")).join("\n");
 }
 function ordersCsv(){
-  const h=["order_id","posted_hk","hall","canteen","priority","fee_hkd","peak","ab_variant","offered_first_to","status","customer","runner","min_to_accept","accepted_within_5min","min_to_pickup","min_request_to_door","no_runner_alert","rating_of_runner","rating_of_customer","app_score_10"];
-  const r=ordersArr().sort((a,b)=>a.createdAt-b.createdAt).map(o=>{const ma=mins(o.createdAt,o.acceptedAt);return[o.id,fmtTime(o.createdAt),o.hall,o.canteen,o.priority?"yes":"no",o.fee,o.peak?"yes":"no",o.variant,o.offeredToName||"",o.status,o.customerName,o.runnerName,ma==null?"":ma.toFixed(2),ma!=null&&ma<=5?"yes":"no",o.pickedAt?mins(o.createdAt,o.pickedAt).toFixed(2):"",o.deliveredAt?mins(o.createdAt,o.deliveredAt).toFixed(2):"",o.noRunnerAt?"yes":"no",o.ratingByCustomer||"",o.ratingByRunner||"",o.appScore||""]});
+  const h=["order_id","posted_hk","hall","canteen","priority","fee_hkd","paid_demo","pay_method","refunded","peak","ab_variant","offered_first_to","status","customer","runner","runner_hall","cross_hall","opened_to_all_halls","min_to_accept","accepted_within_5min","min_to_pickup","min_request_to_door","no_runner_alert","rating_of_runner","rating_of_customer","app_score_10"];
+  const r=ordersArr().sort((a,b)=>a.createdAt-b.createdAt).map(o=>{const ma=mins(o.createdAt,o.acceptedAt);return[o.id,fmtTime(o.createdAt),o.hall,o.canteen,o.priority?"yes":"no",o.fee,o.paid?"yes":"no",o.payMethod||"",o.refunded?"yes":"no",o.peak?"yes":"no",o.variant,o.offeredToName||"",o.status,o.customerName,o.runnerName,o.runnerHall||"",o.crossHall?"yes":"no",o.openedAllAt?"yes":"no",ma==null?"":ma.toFixed(2),ma!=null&&ma<=5?"yes":"no",o.pickedAt?mins(o.createdAt,o.pickedAt).toFixed(2):"",o.deliveredAt?mins(o.createdAt,o.deliveredAt).toFixed(2):"",o.noRunnerAt?"yes":"no",o.ratingByCustomer||"",o.ratingByRunner||"",o.appScore||""]});
   return[h,...r].map(x=>x.map(csvCell).join(",")).join("\n");
 }
 async function download(kind){
@@ -461,6 +481,7 @@ function viewOrder(){
   if(!canOrder(p))return`<div class="empty"><b>Ordering is switched off</b><span>Set "I want to" to Order or Both in your profile.</span></div>`;
   const o=myActiveOrder();
   if(o)return viewTracker(o);
+  if(S.pay)return viewCheckout();
   if(!S.form.room&&!S.form.roomTouched){const last=ordersArr().filter(x=>x.customerId===S.me).sort((a,b)=>b.createdAt-a.createdAt)[0];if(last)S.form.room=last.room}
   const f=S.form,q=quote(f.priority),pool=availableRunners(p.hall,p.id).length;
   const past=ordersArr().filter(x=>x.customerId===S.me&&x.custDone).sort((a,b)=>b.createdAt-a.createdAt).slice(0,4);
@@ -483,35 +504,56 @@ function viewOrder(){
       <div class="tot"><span>You pay your runner</span><b>HK$${q.total}</b></div>
     </div>
     <div class="sched"><span class="chip ${!q.peak?"on":""}">Usually HK$${FEE_OFFPEAK}</span><span class="chip ${q.peak?"pri":""}">Lunch &amp; dinner rush HK$${FEE_PEAK}</span>${q.forced?`<span class="chip test">Test pricing: ${q.peak?"rush":"off-peak"}</span>`:""}</div>
-    <button class="btn" data-act="post">Post request · HK$${q.total}</button>
-    <p class="muted small">Pay the runner directly (PayMe, FPS or cash) when your food arrives.</p>
+    <button class="btn" data-act="post">Continue to payment · HK$${q.total}</button>
+    <p class="muted small">You pay in the app before your request is posted. Cancel before a runner accepts and you're refunded.</p>
   </div>
   ${past.length?`<div class="stack"><h3>Your past requests</h3>${past.map(x=>`<div class="flat"><div class="row"><span class="grow"><b>${esc(x.canteen)}</b> <span class="muted small">· ${ago(x.createdAt)}</span></span><span class="chip ${x.status==="delivered"?"on":""}">${x.status==="delivered"?"Delivered by "+esc(x.runnerName):"Cancelled"}</span></div></div>`).join("")}</div>`:""}`;
 }
 
+const PAY_METHODS=[["PayMe","PayMe"],["FPS","FPS"],["Octopus","Octopus"],["Card","Credit / debit card"]];
+function viewCheckout(){
+  const f=S.form,q=quote(f.priority),pay=S.pay;
+  return`<div class="row"><button class="linkbtn" data-act="pay-back" ${pay.processing?"disabled":""}>← Edit request</button></div>
+  <div class="stack"><h3>Checkout</h3><h1>Pay for your delivery</h1></div>
+  <div class="ticket"><span class="lbl">${esc(f.canteen)} · pickup number</span><span class="big">${esc(f.pickup)}</span><span class="muted small">${esc(me().hall)} · ${esc(f.room)}${f.priority?" · Priority":""}</span></div>
+  <div class="card">
+    <div class="price">
+      <div class="ln"><span>${q.peak?"Rush-hour fee":"Standard fee"}</span><span>HK$${q.base}</span></div>
+      ${f.priority?`<div class="ln"><span>Priority</span><span>+HK$${FEE_PRIORITY}</span></div>`:""}
+      <div class="ln"><span>Of which runner earns</span><span>HK$${q.total-PLATFORM_FEE}</span></div>
+      <div class="tot"><span>Total</span><b>HK$${q.total}</b></div>
+    </div>
+    <div class="stack"><b>Payment method</b>
+      <div class="stack">${PAY_METHODS.map(([v,l])=>`<button class="toggle" data-act="pay-method" data-v="${v}" aria-pressed="${pay.method===v}" ${pay.processing?"disabled":""}><span class="grow"><b>${l}</b></span><span class="radio" aria-hidden="true"></span></button>`).join("")}</div>
+      ${pay.err?`<p class="errmsg" role="alert">${esc(pay.err)}</p>`:""}</div>
+    <button class="btn" data-act="pay" ${pay.processing?"disabled":""}>${pay.processing?"Processing payment…":"Pay HK$"+q.total+" and post request"}</button>
+    <div class="banner info small"><b>Demo payment</b><span>This prototype doesn't charge anything or ask for card details. Tapping Pay records a test payment so we can show the full checkout. If you cancel before a runner accepts, it's marked as refunded.</span></div>
+  </div>`;
+}
 function viewTracker(o){
   const elapsed=now()-o.createdAt, late=o.status==="open"&&elapsed>=ALERT_MS&&!S.waiting.has(o.id);
   let head="",body="";
   if(o.status==="open"){
     head=`<div class="row"><span class="ping" aria-hidden="true"></span><h2 class="grow">Finding a runner in ${esc(o.hall)}…</h2></div>
-      <p class="muted">Posted <span class="mono" data-since="${o.createdAt}">${mmss(elapsed)}</span> ago. Runners in your hall see it the moment they're available.</p>`;
+      <p class="muted">Posted <span class="mono" data-since="${o.createdAt}">${mmss(elapsed)}</span> ago. ${openToAll(o)?"Nobody in "+esc(o.hall)+" took it within 5 minutes, so runners in every hall can now see it.":"Runners in your hall see it the moment they're available. If nobody takes it within 5 minutes, it opens to every hall."}</p>`;
     body=late?`<div class="banner warn" role="status"><b>No runner has taken this yet.</b><p>Nobody in ${esc(o.hall)} seems to be heading back right now. You can keep waiting, or cancel and walk down yourself.</p>
-      ${S.confirmCancel===o.id?`<div class="row"><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`:`<div class="row"><button class="btn warn sm" data-act="cancel" data-id="${o.id}">Cancel request</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`}</div>`
-      :(S.confirmCancel===o.id?`<div class="row"><span class="grow">Cancel this request?</span><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel</button><button class="btn ghost sm" data-act="cancel-no">No</button></div>`:`<button class="linkbtn" data-act="cancel" data-id="${o.id}">Cancel request</button>`);
+      ${S.confirmCancel===o.id?`<div class="row"><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel and refund</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`:`<div class="row"><button class="btn warn sm" data-act="cancel" data-id="${o.id}">Cancel and refund</button><button class="btn ghost sm" data-act="cancel-no" data-id="${o.id}">Keep waiting</button></div>`}</div>`
+      :(S.confirmCancel===o.id?`<div class="row"><span class="grow">Cancel this request?</span><button class="btn warn sm" data-act="cancel-yes" data-id="${o.id}">Yes, cancel and refund</button><button class="btn ghost sm" data-act="cancel-no">No</button></div>`:`<button class="linkbtn" data-act="cancel" data-id="${o.id}">Cancel and refund</button>`);
   }else if(o.status==="accepted"||o.status==="picked_up"){
     head=`<h2>${o.status==="accepted"?"Accepted by "+esc(o.runnerName):esc(o.runnerName)+" picked up your food and is on the way"}</h2>
-      ${personCard(o.runnerName,ratingLine(o.runnerId)+(o.status==="accepted"?" · heading to "+esc(o.canteen):" · coming to "+esc(o.hall)))}`;
+      ${personCard(o.runnerName,ratingLine(o.runnerId)+(o.crossHall?" · from "+esc(o.runnerHall):"")+(o.status==="accepted"?" · heading to "+esc(o.canteen):" · coming to "+esc(o.hall)))}
+      ${o.crossHall?`<p class="muted small">${esc(o.runnerName)} lives in ${esc(o.runnerHall)}. If they can't come up, they'll hand it over at the ${esc(o.hall)} entrance.</p>`:""}`;
     body=`<div class="ticket code"><span class="lbl">Your handoff code</span><span class="big mono">${esc(o.code)}</span><span class="small" style="opacity:.85">Show this at your door once you have your food.</span></div>`;
   }else{
     const r=S.rate[o.id+"c"]||0, sc=S.score[o.id]||0;
     head=`<h2>Delivered. Enjoy your food!</h2>
-      <div class="banner ok"><b>Pay ${esc(o.runnerName)} HK$${o.fee} directly</b><span class="small">PayMe, FPS or cash. ${esc(o.runnerName)} keeps HK$${o.fee-PLATFORM_FEE}; HK$${PLATFORM_FEE} is the USTBites fee.</span></div>`;
+      <div class="banner ok"><b>Paid HK$${o.fee}${o.payMethod?" via "+esc(o.payMethod):""} (demo)</b><span class="small">${esc(o.runnerName)} earns HK$${o.fee-PLATFORM_FEE}; HK$${PLATFORM_FEE} is the USTBites fee. Nothing more to pay.</span></div>`;
     body=`<div class="stack"><b>Rate ${esc(o.runnerName)}</b>${starsHtml(o.id+"c")}</div>
       <div class="stack"><b>How easy was USTBites to use?</b><div class="scale">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button data-act="score" data-id="${o.id}" data-v="${n}" aria-pressed="${sc===n}">${n}</button>`).join("")}</div><div class="row muted small"><span class="grow">1 = very hard</span><span>10 = very easy</span></div></div>
       <button class="btn" data-act="cust-done" data-id="${o.id}">${r||sc?"Send and finish":"Finish"}</button>`;
   }
   return`<div class="card">${stepper(o)}${head}</div>
-  <div class="ticket"><span class="lbl">${esc(o.canteen)} · pickup number</span><span class="big">${esc(o.pickup)}</span><span class="muted small">${esc(o.hall)} · ${esc(o.room)} · HK$${o.fee}${o.priority?" · Priority":""}</span></div>
+  <div class="ticket"><span class="lbl">${esc(o.canteen)} · pickup number</span><span class="big">${esc(o.pickup)}</span><span class="muted small">${esc(o.hall)} · ${esc(o.room)} · HK$${o.fee}${o.paid?" paid":""}${o.priority?" · Priority":""}</span></div>
   ${body?`<div class="card">${body}</div>`:""}`;
 }
 
@@ -522,13 +564,13 @@ function viewDeliver(){
   const stats=`<div class="row muted small"><span class="grow">${st.n} deliver${st.n===1?"y":"ies"} · HK$${st.earn} earned${st.rating?" · ★ "+st.rating.toFixed(1):""}</span></div>`;
   if(job)return viewJob(job)+stats;
   const toggle=`<button class="toggle avail" data-act="avail" aria-pressed="${!!p.available}"><span class="grow"><b>${p.available?"You're available in "+esc(p.hall):"Available to deliver"}</b><br><span class="muted small">${p.available?"You're in the "+esc(p.hall)+" runner pool.":"Turn on when you're heading back to "+esc(p.hall)+"."}</span></span><span class="sw"></span></button>`;
-  if(!p.available)return toggle+`<div class="empty"><b>You're offline</b><span>You'll only ever see requests from ${esc(p.hall)}: jobs on a walk you're already making.</span></div>`+stats;
+  if(!p.available)return toggle+`<div class="empty"><b>You're offline</b><span>You'll see requests from ${esc(p.hall)} first: jobs on a walk you're already making. Requests from other halls show up if nobody there takes them within 5 minutes.</span></div>`+stats;
   const list=ordersArr().filter(o=>visibleToRunner(o,p)).sort((a,b)=>(b.priority-a.priority)||(a.createdAt-b.createdAt));
-  return toggle+`<div class="row"><h2 class="grow">Requests in ${esc(p.hall)}</h2><span class="chip">${list.length}</span></div>`+
+  return toggle+`<div class="row"><h2 class="grow">Requests for you</h2><span class="chip">${list.length}</span></div>`+
    (list.length?list.map(o=>`<div class="req ${o.priority?"priority":""}">
-      <div class="row"><div class="grow"><b>${esc(o.canteen)}</b> → ${esc(o.room)}<div class="muted small">For ${esc(o.customerName)} · posted ${ago(o.createdAt)}</div></div><div class="earn">+HK$${o.fee-PLATFORM_FEE}</div></div>
-      <div class="row">${o.priority?`<span class="chip pri">Priority</span>`:""}${offerActive(o)&&o.offeredTo===p.id?`<span class="chip on">Offered to you first · <span class="mono" data-until="${o.offeredUntil}">${mmss(o.offeredUntil-now())}</span></span>`:""}<span class="grow"></span><button class="btn sm" data-act="accept" data-id="${o.id}">Accept</button></div>
-    </div>`).join(""):`<div class="empty"><b>No requests in ${esc(p.hall)} right now</b><span>New ones appear here the moment they're posted.</span></div>`)+stats;
+      <div class="row"><div class="grow"><b>${esc(o.canteen)}</b> → ${esc(o.room)}<div class="muted small">${o.hall!==p.hall?esc(o.hall)+" · ":""}For ${esc(o.customerName)} · posted ${ago(o.createdAt)}</div></div><div class="earn">+HK$${o.fee-PLATFORM_FEE}</div></div>
+      <div class="row">${o.paid?`<span class="chip on">Paid</span>`:""}${o.hall!==p.hall?`<span class="chip test">Other hall · waiting 5+ min</span>`:""}${o.priority?`<span class="chip pri">Priority</span>`:""}${offerActive(o)&&o.offeredTo===p.id?`<span class="chip on">Offered to you first · <span class="mono" data-until="${o.offeredUntil}">${mmss(o.offeredUntil-now())}</span></span>`:""}<span class="grow"></span><button class="btn sm" data-act="accept" data-id="${o.id}">Accept</button></div>
+    </div>`).join(""):`<div class="empty"><b>No requests in ${esc(p.hall)} right now</b><span>New ones from ${esc(p.hall)} appear here the moment they're posted. Requests from other halls appear if nobody there takes them within 5 minutes.</span></div>`)+stats;
 }
 
 function viewJob(o){
@@ -537,11 +579,12 @@ function viewJob(o){
     <button class="btn" data-act="picked" data-id="${o.id}">I've picked it up</button>`;
   if(o.status==="picked_up")return`<div class="card">${stepper(o)}<h2>Take it to ${esc(o.room)}</h2>
     ${personCard(o.customerName,esc(o.hall)+" · "+esc(o.room))}
+    ${o.crossHall?`<p class="muted small">This is in ${esc(o.hall)}, not your hall. If you can't go up, meet ${esc(o.customerName)} at the ${esc(o.hall)} entrance.</p>`:""}
     <label class="f">Ask ${esc(o.customerName)} for their 4-digit code<input id="code" class="codein ${S.codeErr?"err":""}" inputmode="numeric" maxlength="4" autocomplete="one-time-code" placeholder="····" value="${esc(S.code)}"></label>
     ${S.codeErr?`<p class="errmsg" role="alert">${esc(S.codeErr)}</p>`:""}
     <button class="btn" data-act="code" data-id="${o.id}">Confirm delivery</button></div>`;
   return`<div class="card">${stepper(o)}<h2>Delivered. Nice one!</h2>
-    <div class="banner ok"><b>You earned HK$${o.fee-PLATFORM_FEE}</b><span class="small">HK$${o.fee} fee minus the HK$${PLATFORM_FEE} USTBites fee. ${esc(o.customerName)} pays you directly.</span></div>
+    <div class="banner ok"><b>You earned HK$${o.fee-PLATFORM_FEE}</b><span class="small">HK$${o.fee} fee minus the HK$${PLATFORM_FEE} USTBites fee. ${esc(o.customerName)} already paid in the app (demo payout).</span></div>
     <div class="stack"><b>Rate ${esc(o.customerName)}</b>${starsHtml(o.id+"r")}</div>
     <button class="btn" data-act="run-done" data-id="${o.id}">Done</button></div>`;
 }
@@ -676,6 +719,9 @@ document.addEventListener("click",e=>{
     case"canteen":S.form.canteen=v;render();break;
     case"priority":S.form.priority=!S.form.priority;render();break;
     case"post":postRequest();break;
+    case"pay-method":if(S.pay&&!S.pay.processing){S.pay.method=v;S.pay.err="";render()}break;
+    case"pay":payAndPost();break;
+    case"pay-back":S.pay=null;render();break;
     case"cancel":S.confirmCancel=id;render();break;
     case"cancel-no":S.confirmCancel=null;if(b.dataset.id)S.waiting.add(b.dataset.id);render();break;
     case"cancel-yes":if(o)cancelOrder(o);break;

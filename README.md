@@ -9,17 +9,18 @@ A student orders at the canteen as usual, posts the pickup number in USTBites, a
 - Sign-up limited to `@connect.ust.hk` emails (email verification is not built yet)
 - Profile with hall and role: order, deliver or both
 - Request form: canteen, pickup number, floor and room, Priority (+HK$5)
+- Demo checkout before the request is posted (PayMe, FPS, Octopus or card). No money moves and no card details are asked for; cancelling before a runner accepts marks it refunded
 - Pricing: HK$12, HK$15 in the lunch (11:30–14:00) and dinner (17:30–20:30) rush, Hong Kong time
-- Runners join their hall's pool by turning on "Available"; requests only go to that hall
+- Runners join their hall's pool by turning on "Available"; requests go to that hall first, and open to runners in every hall if nobody accepts within 5 minutes
 - The first runner to accept locks the request; the customer sees who accepted it
 - Statuses: Requested → Accepted → Picked up → Delivered, saved in the database (survive reloads)
 - Delivery closes only with the customer's 4-digit code
-- Two-way ratings; runner earnings = fee − HK$2; ratings of 2 or less are flagged for the team
+- Two-way ratings; runner earnings = fee − HK$2 (demo payout); ratings of 2 or less are flagged for the team
 - "No runner after 10 minutes" warning with cancel
 - A/B test: each request is randomly assigned A (all runners at once) or B (one runner first for 3 minutes)
 - Team data: event log, orders table, A/B results, CSV downloads, test-data reset
 
-Not built: payments (customers pay runners directly), USThing login, live tracking, canteen integration.
+Not built: real payments (checkout is a demo), USThing login, live tracking, canteen integration.
 
 ## Set up your own copy (about 15 minutes)
 
